@@ -2,6 +2,10 @@ import whois
 import requests
 from urllib.parse import urlparse
 import datetime
+import socket  # socket 모듈 임포트
+import ssl  # ssl 모듈 임포트
+from cryptography import x509  # x509 모듈 임포트
+from cryptography.hazmat.backends import default_backend  # default_backend 임포트
 
 
 # 피처 함수들 정의
@@ -9,85 +13,132 @@ import datetime
 def google_index(url):
     try:
         response = requests.get(f"https://www.google.com/search?q=site:{urlparse(url).netloc}")
-        return -1 if 'No results' not in response.text else 1
+        return 1 if 'No results' in response.text else -1  # 피싱이면 1, 정상이면 -1
     except requests.RequestException as e:
         print(f"Google Index Error: {e}")
-        return 0  # 의심
+        return 1  # 예외 발생 시 피싱으로 간주
 
-def domain_registration_period(url):
+# 도메인 등록 기간 (Domain_registration_length)
+def domain_registration_length(url):
     try:
+        # URL에서 도메인 추출
         domain = urlparse(url).netloc
+
+        # 도메인 정보 가져오기
         domain_info = whois.whois(domain)
+
+        # 도메인의 등록 만료일 추출
+        expiration_date = domain_info.expiration_date
+
+        # 등록 만료일이 리스트로 반환되는 경우 첫 번째 항목 선택
+        if isinstance(expiration_date, list):
+            expiration_date = expiration_date[0]
+
+        # 만료일이 없는 경우 피싱으로 간주
+        if expiration_date is None:
+            return 1
+
+        # 현재 날짜와의 차이 계산
+        remaining_days = (expiration_date - datetime.datetime.now()).days
+
+        # 도메인 등록 기간이 1년(365일) 이상이면 정상, 그렇지 않으면 피싱
+        return -1 if remaining_days >= 365 else 1
+
+    except Exception as e:
+        print(f"Domain Registration Length Error: {e}")
+        return 1  # 오류 발생 시 피싱으로 간주
+
+# 도메인 수명 (Age_of_Domain)
+def age_of_domain(url):
+    try:
+        # URL에서 도메인 추출
+        domain = urlparse(url).netloc
+
+        # 도메인 정보 가져오기
+        domain_info = whois.whois(domain)
+
+        # 도메인의 생성일 추출
         creation_date = domain_info.creation_date
+
+        # 생성일이 리스트로 반환되는 경우 첫 번째 항목 선택
         if isinstance(creation_date, list):
             creation_date = creation_date[0]
-        if creation_date is None:
-            return 0  # 의심
-        age_days = (datetime.datetime.now() - creation_date).days
-        return 1 if age_days < 180 else -1
-    except Exception as e:
-        print(f"Domain Registration Period Error: {e}")
-        return 0  # 의심
 
-def domain_age(url):
-    try:
-        domain = urlparse(url).netloc
-        domain_info = whois.whois(domain)
-        creation_date = domain_info.creation_date
-        if isinstance(creation_date, list):
-            creation_date = creation_date[0]
+        # 생성일이 없는 경우 피싱으로 간주
         if creation_date is None:
-            return 0  # 의심
+            return 1
+
+        # 도메인 나이 계산
         age_days = (datetime.datetime.now() - creation_date).days
-        #도메인 등록 기간이 6개월 미만인 경우에 피싱사이트로 간주
-        return 1 if age_days < 183 else -1
+
+        # 도메인 나이가 6개월(183일) 이상이면 정상, 그렇지 않으면 피싱
+        return -1 if age_days >= 183 else 1
+
     except Exception as e:
-        print(f"Domain Age Error: {e}")
-        return 0  # 의심
+        print(f"Age of Domain Error: {e}")
+        return 1  # 오류 발생 시 피싱으로 간주
 
 def dns_record(url):
     try:
         domain = urlparse(url).netloc
         domain_info = whois.whois(domain)
+        
+        # 도메인 정보가 없거나 상태 정보가 없는 경우 피싱으로 간주
         if domain_info is None or domain_info.status is None:
             return 1  # 피싱
+        
         return -1  # 정상
     except Exception as e:
         print(f"DNS Record Error: {e}")
-        return 0  # 의심
+        return 1  # 예외 발생 시 피싱으로 간주
 
-def ssl_certificate_status(url):
-    try:
-        response = requests.get(url, timeout=5)
-        return -1 if 'https' in response.url else 1  # 피싱이면 1, 정상이면 -1
-    except requests.RequestException as e:
-        print(f"SSL Certificate Status Error: {e}")
-        return 0  # 의심
-    except Exception as e:
-        print(f"SSL Certificate Status General Error: {e}")
-        return 0  # 의심
-
-# def having_subdomain(url):
+# def ssl_certificate_status(url):
 #     try:
-#         subdomain_count = urlparse(url).netloc.count('.')
-#         return 1 if subdomain_count > 1 else -1  # 피싱이면 1, 정상이면 -1
+#         response = requests.get(url, timeout=5)
+#         return -1 if 'https' in response.url else 1  # 피싱이면 1, 정상이면 -1
+#     except requests.RequestException as e:
+#         print(f"SSL Certificate Status Error: {e}")
+#         return 0  # 의심
 #     except Exception as e:
-#         print(f"Having Subdomain Error: {e}")
+#         print(f"SSL Certificate Status General Error: {e}")
 #         return 0  # 의심
 
+def sslfinal_state(url):
+    # 1. HTTPS 사용 여부 확인
+    if not url.startswith("https://"):
+        return 1  # 피싱 사이트 (HTTPS를 사용하지 않음)
+    
+    try:
+        # 2. SSL 인증서 정보 가져오기
+        hostname = url.split("://")[1].split('/')[0]
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, 443)) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
 
-# def having_subdomain(url):
-#     try:
-#         subdomain_count = urlparse(url).netloc.count('.')
-#         if subdomain_count == 0:
-#             return -1  # 정상 (legitimate)
-#         elif subdomain_count == 1:
-#             return 0  # 의심 (suspicious)
-#         else:
-#             return 1  # 피싱 (phishing)
-#     except Exception as e:
-#         print(f"Having Subdomain Error: {e}")
-#         return 0  # 의심 (suspicious)
+        # 3. 인증서 발급자 확인
+        issuer = dict(x[0] for x in cert['issuer'])
+        trusted_issuers = ["Let's Encrypt", "DigiCert", "GlobalSign", "Comodo", "Symantec"]  # 신뢰할 수 있는 발급자 목록
+        
+        if issuer.get('organizationName', '') in trusted_issuers:
+            trusted = True
+        else:
+            trusted = False
+
+        # 4. 인증서 기간 확인
+        not_after = datetime.datetime.strptime(cert['notAfter'], '%b %d %H:%M:%S %Y %Z')
+        period = (not_after - datetime.datetime.utcnow()).days
+        
+        if trusted and period >= 365:
+            return -1  # 정상이면 -1 반환
+        elif not trusted or period < 365:
+            return 0  # 의심스러운 경우 0 반환
+        else:
+            return 1  # 피싱 사이트 (기타 경우)
+    except Exception as e:
+        print(f"SSL Certificate Status Error: {e}")
+        return 1  # 피싱 사이트 (오류 발생 시)
+    
 def having_subdomain(url):
     try:
         netloc = urlparse(url).netloc
@@ -107,12 +158,6 @@ def having_subdomain(url):
         return 0  # 예외 발생 시 의심
 
 
-# def https_token(url):
-#     try:
-#         return 1 if 'https-' in url else -1  # 피싱이면 1, 정상이면 -1
-#     except Exception as e:
-#         print(f"HTTPS Token Error: {e}")
-#         return 0  # 의심
 def https_token(url):
     try:
         # URL에서 도메인 부분을 추출
@@ -124,9 +169,9 @@ def https_token(url):
         else:
             return -1  # 정상
     except Exception as e:
-        # 예외 발생 시 의심으로 간주
+        # 예외 발생 시 피싱으로 간주
         print(f"HTTPS Token Error: {e}")
-        return 0  # 의심
+        return 1  # 피싱
 
 def web_traffic(url):
     try:
@@ -138,10 +183,10 @@ def web_traffic(url):
 def check_url(url):
     results = {}
     results['Google_Index'] = google_index(url)
-    results['Domain_registeration_length'] = domain_registration_period(url)
-    results['age_of_domain'] = domain_age(url)
+    results['Domain_registeration_length'] = domain_registration_length(url)
+    results['age_of_domain'] = age_of_domain(url)
     results['DNSRecord'] = dns_record(url)
-    results['SSLfinal_State'] = ssl_certificate_status(url)
+    results['SSLfinal_State'] = sslfinal_state(url)
     results['having_Sub_Domain'] = having_subdomain(url)
     results['HTTPS_token'] = https_token(url)
     results['web_traffic'] = web_traffic(url)
