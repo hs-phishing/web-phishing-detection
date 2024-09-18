@@ -2,7 +2,7 @@ import asyncio
 from features import short_url_features, url_based_feature, content_based_features, domain_based_features
 from entity.models import Features
 import numpy as np
-import time
+from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.exc import IntegrityError
 
 # 피처 이름 목록을 모델 학습 데이터의 피처 순서와 일치시킴
@@ -14,23 +14,38 @@ FEATURE_ORDER = [
 ]
 
 # URL 기반 피처 목록
-URL_BASED_FEATURES = [
-    'having_IPhaving_IP_Address', 'URLURL_Length', 'Shortining_Service',
-    'having_At_Symbol', 'double_slash_redirecting', 'Prefix_Suffix'
-]
+URL_BASED_FEATURES = {
+    'having_IPhaving_IP_Address': 'having_ip_address',
+    'URLURL_Length': 'url_length',
+    'Shortining_Service': 'shortening_service',
+    'having_At_Symbol': 'having_at_symbol',
+    'double_slash_redirecting': 'double_slash_redirecting',
+    'Prefix_Suffix': 'prefix_suffix'
+}
 
 # 컨텐츠 기반 피처 목록
-CONTENT_BASED_FEATURES = [
-    'RightClick', 'popUpWidnow', 'Iframe', 'Favicon', 'Request_URL',
-    'URL_of_Anchor', 'Links_in_tags', 'SFH', 'Submitting_to_email',
-    'Redirect', 'on_mouseover'
-]
+CONTENT_BASED_FEATURES = {
+    'RightClick': 'right_click',
+    'popUpWidnow': 'popup_window',
+    'Iframe': 'iframe',
+    'Favicon': 'favicon',
+    'Request_URL': 'request_url',
+    'URL_of_Anchor': 'url_of_anchor',
+    'Links_in_tags': 'links_in_tags',
+    'SFH': 'sfh',
+    'Submitting_to_email': 'submitting_to_email',
+    'Redirect': 'redirect',
+    'on_mouseover': 'on_mouseover'
+}
 
 # 도메인 기반 피처 목록
-DOMAIN_BASED_FEATURES = [
-    'Google_Index', 'age_of_domain', 'SSLfinal_State', 'having_Sub_Domain',
-    'HTTPS_token'
-]
+DOMAIN_BASED_FEATURES = {
+    'Google_Index': 'google_index',
+    'age_of_domain': 'age_of_domain',
+    'SSLfinal_State': 'ssl_final_state',
+    'having_Sub_Domain': 'having_sub_domain',
+    'HTTPS_token': 'https_token'
+}
 
 # 피처 추출 함수
 async def extract_features(url):
@@ -74,6 +89,82 @@ async def extract_features(url):
     
     return np.array(feature_values).reshape(1, -1), features
 
+
+def get_features_from_db(db, url_id):
+    """
+    Features 테이블에서 url_id에 해당하는 데이터를 반환하는 함수.
+    
+    Args:
+        db: 데이터베이스 세션 객체.
+        url_id: URLs 테이블의 url_id.
+    
+    Returns:
+        features: 추출된 피처의 딕셔너리 또는 None.
+    """
+    try:
+        # Features 테이블에서 해당 URL에 대한 피처가 있는지 확인
+        features_entity = db.session.query(Features).filter_by(url_id=url_id).first()
+
+        if features_entity:
+            # 존재하는 경우, 해당 피처들을 딕셔너리로 반환
+            features = {
+                'having_IPhaving_IP_Address': features_entity.having_ip_address,
+                'URLURL_Length': features_entity.url_length,
+                'Shortining_Service': features_entity.shortening_service,
+                'having_At_Symbol': features_entity.having_at_symbol,
+                'double_slash_redirecting': features_entity.double_slash_redirecting,
+                'Prefix_Suffix': features_entity.prefix_suffix,
+                'having_Sub_Domain': features_entity.having_sub_domain,
+                'SSLfinal_State': features_entity.ssl_final_state,
+                'Favicon': features_entity.favicon,
+                'port': features_entity.port,
+                'HTTPS_token': features_entity.https_token,
+                'Request_URL': features_entity.request_url,
+                'URL_of_Anchor': features_entity.url_of_anchor,
+                'Links_in_tags': features_entity.links_in_tags,
+                'SFH': features_entity.sfh,
+                'Submitting_to_email': features_entity.submitting_to_email,
+                'Redirect': features_entity.redirect,
+                'on_mouseover': features_entity.on_mouseover,
+                'RightClick': features_entity.right_click,
+                'popUpWidnow': features_entity.popup_window,
+                'Iframe': features_entity.iframe,
+                'age_of_domain': features_entity.age_of_domain,
+                'Google_Index': features_entity.google_index
+            }
+            return features
+        else:
+            print(f"No features found for URL ID {url_id}")
+            return None
+    except NoResultFound:
+        print(f"Error: No result found for URL ID {url_id}")
+        return None
+
+def extract_suspicious_features_from_db(db, url_id):
+    """
+    URL ID에 해당하는 Features를 데이터베이스에서 가져와, 의심 피처를 추출하는 함수.
+    
+    Args:
+        db: 데이터베이스 세션 객체.
+        url_id: URLs 테이블의 url_id.
+    
+    Returns:
+        suspicious_features: 의심 피처들.
+    """
+    # DB에서 해당 url_id에 해당하는 features 가져오기
+    features = get_features_from_db(db, url_id)
+    
+    if features:
+        # 의심 피처 추출
+        suspicious_features = get_suspicious_features(features)
+        
+        print("Suspicious Features: ", suspicious_features)
+        return suspicious_features
+    else:
+        print(f"No features found for URL ID {url_id}")
+        return None
+
+
 def get_suspicious_features(features):
     """피처 딕셔너리에서 값이 1인 의심 피처를 URL, Content, Domain 기반으로 나누어 반환하는 함수."""
 
@@ -82,30 +173,31 @@ def get_suspicious_features(features):
     suspicious_domain_based = []
     
     # URL 기반 피처 확인
-    for feature_name in URL_BASED_FEATURES:
-        if features.get(feature_name, 0) == 1:
-            suspicious_url_based.append(feature_name)
+    for key, value in URL_BASED_FEATURES.items():
+        if features.get(key, 0) == 1 or features.get(key, 0) == 0:
+            suspicious_url_based.append(value)
 
     # Content 기반 피처 확인
-    for feature_name in CONTENT_BASED_FEATURES:
-        if features.get(feature_name, 0) == 1:
-            suspicious_content_based.append(feature_name)
+    for key, value in CONTENT_BASED_FEATURES.items():
+        if features.get(key, 0) == 1 or features.get(key, 0) == 0:
+            suspicious_content_based.append(value)
 
     # Domain 기반 피처 확인
-    for feature_name in DOMAIN_BASED_FEATURES:
-        if features.get(feature_name, 0) == 1:
-            suspicious_domain_based.append(feature_name)
+    for key, value in DOMAIN_BASED_FEATURES.items():
+        if features.get(key, 0) == 1 or features.get(key, 0) == 0:
+            suspicious_domain_based.append(value)
 
     # 각 그룹의 의심 피처들을 사전 형태로 반환
     return {
-        "URL_based": suspicious_url_based,
-        "Content_based": suspicious_content_based,
-        "Domain_based": suspicious_domain_based
+        "url_based_features": suspicious_url_based,
+        "content_based_features": suspicious_content_based,
+        "domain_based_features": suspicious_domain_based
     }
 
 
 # Features 테이블에 피처 추가 또는 업데이트하는 함수
-def add_or_update_features_entity(db, url_id, features):
+def add_or_update_features(db, url_id, features):
+
     """
     Features 테이블에 피처 값을 추가하거나 업데이트하는 함수.
     

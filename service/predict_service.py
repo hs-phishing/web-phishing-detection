@@ -1,5 +1,7 @@
 import pickle
 from entity.models import Predictions
+
+# 피싱 여부 및 확률 예측 함수
 from service.blacklist_service import update_blacklist
 
 # 피싱 여부 및 확률 예측 함수
@@ -43,6 +45,7 @@ def add_or_update_predictions(db, url_id, prediction_result, prediction_prob):
             print(f"Prediction updated for URL ID {url_id}")
             # 업데이트된 경우 Blacklist 테이블도 업데이트 (b_result, b_prob)
             update_blacklist(db, url_id, prediction_result, prediction_prob)
+
         else:
             # 레코드가 없을 경우 새로 추가
             new_prediction_entity = Predictions(
@@ -53,10 +56,47 @@ def add_or_update_predictions(db, url_id, prediction_result, prediction_prob):
             db.session.add(new_prediction_entity)
             print(f"New prediction added for URL ID {url_id}")
 
+        # 데이터베이스에 커밋
         db.session.commit()
-
 
     except Exception as e:
         # 에러 발생 시 롤백 및 로그 출력
         db.session.rollback()
         print(f"Error saving or updating prediction for URL ID {url_id}: {e}")
+
+
+# # Predictions 테이블의 피싱 여부 및 확률 업데이트
+# def update_predictions_entity(db, url_id, prediction_result, prediction_prob):
+#     print('prediction result: '+str(prediction_result))
+#     print('prediction prob: '+str(prediction_prob))
+    
+#     # 기존 Predictions가 있는지 확인
+
+
+#     prediction_entity = Predictions.query.filter_by(url_id=url_id).first()
+
+#     prediction_entity.prediction_result = prediction_result
+#     prediction_entity.prediction_prob = prediction_prob
+
+#     # 데이터베이스에 커밋
+#     db.session.commit()
+
+#     print(f"Prediction updated for URL ID {url_id}")
+
+
+# # Predictions 테이블에 예측 결과를 저장하는 함수
+# def add_predictions_entity(db, url_id, prediction_result, prediction_prob):
+#     # 예측 결과 저장
+#     new_prediction_entity = Predictions(
+#         url_id=url_id,
+#         prediction_result=prediction_result,  # 피싱 여부
+#         prediction_prob=prediction_prob,  # 피싱 확률
+#     )
+
+#     db.session.add(new_prediction_entity)
+
+#     # 데이터베이스에 커밋
+#     db.session.commit()
+
+#     print(f"New prediction added for URL ID {url_id}")
+
